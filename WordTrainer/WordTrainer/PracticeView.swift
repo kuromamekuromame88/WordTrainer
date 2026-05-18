@@ -3,7 +3,9 @@ import SwiftUI
 struct PracticeView: View {
     @ObservedObject var store: WordStore
     @State private var currentIndex = 0
-    @State private var showingAnswer = false
+    @State private var answerText = ""
+    @State private var checkedAnswer: CheckedAnswer?
+    @FocusState private var isAnswerFocused: Bool
 
     private var dueWords: [VocabularyWord] {
         store.dueWords
@@ -18,26 +20,32 @@ struct PracticeView: View {
         NavigationStack {
             VStack(spacing: 20) {
                 if let word = currentWord {
-                    Spacer(minLength: 20)
+                    Spacer(minLength: 12)
 
-                    VStack(spacing: 16) {
-                        Text(word.term)
-                            .font(.system(size: 42, weight: .bold, design: .rounded))
-                            .multilineTextAlignment(.center)
+                    VStack(alignment: .leading, spacing: 18) {
+                        Text("この意味の英単語は？")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
 
-                        if showingAnswer {
-                            VStack(spacing: 10) {
-                                Text(word.meaning)
-                                    .font(.title3)
+                        Text(word.meaning)
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .minimumScaleFactor(0.7)
 
-                                if !word.example.isEmpty {
-                                    Text(word.example)
-                                        .font(.body)
-                                        .foregroundStyle(.secondary)
-                                        .multilineTextAlignment(.center)
-                                }
+                        TextField("英単語を入力", text: $answerText)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .focused($isAnswerFocused)
+                            .submitLabel(.done)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(checkedAnswer != nil)
+                            .onSubmit {
+                                check(word)
                             }
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+
+                        if let checkedAnswer {
+                            ResultPanel(result: checkedAnswer, word: word)
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
                     }
                     .frame(maxWidth: .infinity)
@@ -45,7 +53,16 @@ struct PracticeView: View {
 
                     Spacer()
 
-                    if showingAnswer {
+                    if checkedAnswer == nil {
+                        Button {
+                            check(word)
+                        } label: {
+                            Label("答え合わせ", systemImage: "checkmark.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(normalized(answerText).isEmpty)
+                    } else {
                         HStack(spacing: 12) {
                             Button {
                                 rate(word, as: .learning)
@@ -63,16 +80,6 @@ struct PracticeView: View {
                             }
                             .buttonStyle(.borderedProminent)
                         }
-                    } else {
-                        Button {
-                            withAnimation(.snappy) {
-                                showingAnswer = true
-                            }
-                        } label: {
-                            Label("答えを見る", systemImage: "eye")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
                     }
                 } else {
                     ContentUnavailableView(
@@ -84,14 +91,88 @@ struct PracticeView: View {
             }
             .padding()
             .navigationTitle("復習")
+            .onChange(of: currentWord?.id) { _, _ in
+                resetAnswer()
+            }
+            .onAppear {
+                isAnswerFocused = currentWord != nil
+            }
+        }
+    }
+
+    private func check(_ word: VocabularyWord) {
+        let userAnswer = normalized(answerText)
+        guard !userAnswer.isEmpty else { return }
+
+        let correctAnswer = normalized(word.term)
+        let isCorrect = userAnswer == correctAnswer
+
+        withAnimation(.snappy) {
+            checkedAnswer = CheckedAnswer(input: answerText, isCorrect: isCorrect)
         }
     }
 
     private func rate(_ word: VocabularyWord, as mastery: Mastery) {
         store.mark(word, as: mastery)
-        showingAnswer = false
+        moveToNextQuestion()
+    }
+
+    private func moveToNextQuestion() {
+        resetAnswer()
         if currentIndex >= max(dueWords.count - 1, 0) {
             currentIndex = 0
         }
+        isAnswerFocused = currentWord != nil
+    }
+
+    private func resetAnswer() {
+        answerText = ""
+        checkedAnswer = nil
+    }
+
+    private func normalized(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
+
+private struct CheckedAnswer: Equatable {
+    let input: String
+    let isCorrect: Bool
+}
+
+private struct ResultPanel: View {
+    let result: CheckedAnswer
+    let word: VocabularyWord
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(result.isCorrect ? "正解です" : "答えを確認しましょう", systemImage: result.isCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .font(.headline)
+                .foregroundStyle(result.isCorrect ? .green : .red)
+
+            HStack {
+                Text("入力")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(result.input)
+                    .font(.body)
+            }
+
+            HStack {
+                Text("正解")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(word.term)
+                    .font(.headline)
+            }
+
+            if !word.example.isEmpty {
+                Text(word.example)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
     }
 }
