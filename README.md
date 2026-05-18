@@ -1,0 +1,2 @@
+# WordTrainer
+Codexに作ってもらったiOSアプリ
