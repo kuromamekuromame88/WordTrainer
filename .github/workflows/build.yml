@@ -1,0 +1,52 @@
+name: IOS向けのIPA生成
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Xcodeのversion確認
+        run: xcodebuild -version
+
+      - name: 初期化
+        run: |
+          xcodebuild clean \
+            -project WordTrainer/WordTrainer.xcodeproj \
+            -scheme WordTrainer \
+            -configuration Release
+
+      - name: アーカイブ（署名なし）
+        run: |
+          xcodebuild archive \
+            -project WordTrainer/WordTrainer.xcodeproj \
+            -scheme WordTrainer \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath build/WordTrainer.xcarchive \
+            INFOPLIST_FILE=WordTrainer/Info.plist \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: 署名なしIPAの作成
+        run: |
+          mkdir -p build/ipa/Payload
+          cp -R \
+            build/WordTrainer.xcarchive/Products/Applications/WordTrainer.app \
+            build/ipa/Payload/
+
+          cd build/ipa
+          zip -r WordTrainer.ipa Payload
+
+      - name: 署名なしIPAのartifactへのアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: SimpleToDo-unsigned-ipa
+          path: build/ipa/WordTrainer.ipa
