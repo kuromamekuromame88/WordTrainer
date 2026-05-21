@@ -1,16 +1,37 @@
+import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct WordListView: View {
     @ObservedObject var store: WordStore
     @State private var searchText = ""
     @State private var showingAddWord = false
+    @State private var selectedSeries = "すべて"
+    @State private var isExporting = false
+    @State private var isImporting = false
+    @State private var exportDocument = VocabularyJSONDocument(words: [])
+    @State private var importMessage: String?
+
+    private static let allSeriesTitle = "すべて"
+
+    private var selectedSeriesFilter: String? {
+        selectedSeries == Self.allSeriesTitle ? nil : selectedSeries
+    }
+
+    private var seriesOptions: [String] {
+        [Self.allSeriesTitle] + store.seriesNames
+    }
+
+    private var seriesFilteredWords: [VocabularyWord] {
+        store.words(in: selectedSeriesFilter)
+    }
 
     private var filteredWords: [VocabularyWord] {
         guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return store.words
+            return seriesFilteredWords
         }
 
-        return store.words.filter {
+        return seriesFilteredWords.filter {
             $0.term.localizedCaseInsensitiveContains(searchText)
             || $0.meaning.localizedCaseInsensitiveContains(searchText)
             || $0.series.localizedCaseInsensitiveContains(searchText)
@@ -27,6 +48,14 @@ struct WordListView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    Picker("表示シリーズ", selection: $selectedSeries) {
+                        ForEach(seriesOptions, id: \.self) { series in
+                            Text(series).tag(series)
+                        }
+                    }
+                }
+
                 if filteredWords.isEmpty {
                     ContentUnavailableView(
                         "語句がありません",
@@ -53,6 +82,26 @@ struct WordListView: View {
             .navigationTitle("語句")
             .searchable(text: $searchText, prompt: "語句・問題文・シリーズを検索")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        Button {
+                            prepareExport()
+                        } label: {
+                            Label("JSONを書き出す", systemImage: "square.and.arrow.up")
+                        }
+                        .disabled(store.exportWords(in: selectedSeriesFilter).isEmpty)
+
+                        Button {
+                            isImporting = true
+                        } label: {
+                            Label("JSONを読み込む", systemImage: "square.and.arrow.down")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("読み込みと書き出し")
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showingAddWord = true
@@ -67,6 +116,63 @@ struct WordListView: View {
                     store.add(term: term, meaning: meaning, series: series, answerMode: answerMode, example: example, note: note)
                 }
             }
+            .fileExporter(
+                isPresented: $isExporting,
+                document: exportDocument,
+                contentType: .json,
+                defaultFilename: exportFilename
+            ) { result in
+                if case .failure(let error) = result {
+                    importMessage = "書き出しに失敗しました: \(error.localizedDescription)"
+                }
+            }
+            .fileImporter(
+                isPresented: $isImporting,
+                allowedContentTypes: [.json],
+                allowsMultipleSelection: false
+            ) { result in
+                importJSON(from: result)
+            }
+            .alert("JSON", isPresented: Binding(
+                get: { importMessage != nil },
+                set: { if !$0 { importMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(importMessage ?? "")
+            }
+        }
+    }
+
+    private var exportFilename: String {
+        let baseName = selectedSeries == Self.allSeriesTitle ? "all-series" : selectedSeries
+        let safeName = baseName
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: "\\", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        return "\(safeName)-questions.json"
+    }
+
+    private func prepareExport() {
+        exportDocument = VocabularyJSONDocument(words: store.exportWords(in: selectedSeriesFilter))
+        isExporting = true
+    }
+
+    private func importJSON(from result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else { return }
+            let didAccess = url.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            let data = try Data(contentsOf: url)
+            let count = try store.importWords(from: data)
+            importMessage = "\(count)件の語句を読み込みました。"
+        } catch {
+            importMessage = "読み込みに失敗しました: \(error.localizedDescription)"
         }
     }
 
@@ -79,6 +185,26 @@ struct WordListView: View {
             }
         }
         store.delete(at: storeOffsets)
+    }
+}
+
+struct VocabularyJSONDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+
+    var data: Data
+
+    init(words: [VocabularyWord]) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        data = (try? encoder.encode(words)) ?? Data("[]".utf8)
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        data = configuration.file.regularFileContents ?? Data()
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
     }
 }
 

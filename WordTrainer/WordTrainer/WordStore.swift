@@ -59,6 +59,19 @@ final class WordStore: ObservableObject {
         Array(Set(words.map { normalizedSeries($0.series) })).sorted()
     }
 
+    func words(in series: String?) -> [VocabularyWord] {
+        words
+            .filter { word in
+                series == nil || normalizedSeries(word.series) == normalizedSeries(series ?? "")
+            }
+            .sorted { lhs, rhs in
+                if normalizedSeries(lhs.series) == normalizedSeries(rhs.series) {
+                    return lhs.term.localizedCaseInsensitiveCompare(rhs.term) == .orderedAscending
+                }
+                return normalizedSeries(lhs.series) < normalizedSeries(rhs.series)
+            }
+    }
+
     func dueWords(in series: String?) -> [VocabularyWord] {
         words
             .filter { word in
@@ -83,6 +96,34 @@ final class WordStore: ObservableObject {
         let fallback = Self.fallbackChoices.filter { normalized($0) != normalized(correct) }
         let candidates = uniqueTerms(sameSeries + otherSeries + fallback, excluding: correct)
         return Array(([correct] + candidates.prefix(max(count - 1, 0))).shuffled())
+    }
+
+    func exportWords(in series: String?) -> [VocabularyWord] {
+        words(in: series)
+    }
+
+    @discardableResult
+    func importWords(from data: Data) throws -> Int {
+        let importedWords = try JSONDecoder().decode([VocabularyWord].self, from: data)
+        var importedCount = 0
+
+        for importedWord in importedWords {
+            var normalizedWord = importedWord
+            normalizedWord.series = normalizedSeries(importedWord.series)
+
+            if let index = words.firstIndex(where: { $0.id == normalizedWord.id }) {
+                words[index] = normalizedWord
+            } else {
+                words.insert(normalizedWord, at: 0)
+            }
+            importedCount += 1
+        }
+
+        if importedCount > 0 {
+            save()
+        }
+
+        return importedCount
     }
 
     private func load() {

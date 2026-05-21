@@ -47,6 +47,5 @@ jobs:
       - name: 署名なしIPAのartifactへのアップロード
         uses: actions/upload-artifact@v7
         with:
-          name: WordTrainer.ipa
           archive: false
           path: build/ipa/WordTrainer.ipa
