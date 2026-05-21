@@ -7,7 +7,7 @@ struct ContentView: View {
         TabView {
             WordListView(store: store)
                 .tabItem {
-                    Label("単語", systemImage: "text.book.closed")
+                    Label("語句", systemImage: "text.book.closed")
                 }
 
             PracticeView(store: store)

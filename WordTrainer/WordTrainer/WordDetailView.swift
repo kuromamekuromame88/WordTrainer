@@ -24,6 +24,11 @@ struct WordDetailView: View {
                 .padding(.vertical, 8)
             }
 
+            Section("分類と出題") {
+                LabeledContent("シリーズ", value: word.series)
+                LabeledContent("回答形式", value: word.answerMode.title)
+            }
+
             if !word.example.isEmpty {
                 Section("例文") {
                     Text(word.example)
@@ -45,7 +50,7 @@ struct WordDetailView: View {
                 .pickerStyle(.segmented)
             }
         }
-        .navigationTitle("単語詳細")
+        .navigationTitle("語句詳細")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             Button("編集") {
@@ -53,9 +58,12 @@ struct WordDetailView: View {
             }
         }
         .sheet(isPresented: $showingEditor) {
-            WordEditorView(title: "単語を編集", saveTitle: "更新", word: word) { term, meaning, example, note in
+            WordEditorView(title: "語句を編集", saveTitle: "更新", word: word) { term, meaning, series, answerMode, example, note in
                 word.term = term.trimmingCharacters(in: .whitespacesAndNewlines)
                 word.meaning = meaning.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmedSeries = series.trimmingCharacters(in: .whitespacesAndNewlines)
+                word.series = trimmedSeries.isEmpty ? "未分類" : trimmedSeries
+                word.answerMode = answerMode
                 word.example = example.trimmingCharacters(in: .whitespacesAndNewlines)
                 word.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
                 store.update(word)

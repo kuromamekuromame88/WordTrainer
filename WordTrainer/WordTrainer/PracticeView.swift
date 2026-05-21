@@ -2,13 +2,21 @@ import SwiftUI
 
 struct PracticeView: View {
     @ObservedObject var store: WordStore
+    @State private var selectedSeries = "すべて"
     @State private var currentIndex = 0
     @State private var answerText = ""
     @State private var checkedAnswer: CheckedAnswer?
+    @State private var choiceOptions: [String] = []
     @FocusState private var isAnswerFocused: Bool
 
+    private static let allSeriesTitle = "すべて"
+
+    private var selectedSeriesFilter: String? {
+        selectedSeries == Self.allSeriesTitle ? nil : selectedSeries
+    }
+
     private var dueWords: [VocabularyWord] {
-        store.dueWords
+        store.dueWords(in: selectedSeriesFilter)
     }
 
     private var currentWord: VocabularyWord? {
@@ -16,32 +24,65 @@ struct PracticeView: View {
         return dueWords[currentIndex]
     }
 
+    private var seriesOptions: [String] {
+        [Self.allSeriesTitle] + store.seriesNames
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
+                Picker("シリーズ", selection: $selectedSeries) {
+                    ForEach(seriesOptions, id: \.self) { series in
+                        Text(series).tag(series)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+
                 if let word = currentWord {
                     Spacer(minLength: 12)
 
                     VStack(alignment: .leading, spacing: 18) {
-                        Text("この意味の英単語は？")
+                        HStack {
+                            Label(word.series, systemImage: "folder")
+                            Spacer()
+                            Text(word.answerMode.title)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                        Text("この問題の答えは？")
                             .font(.headline)
                             .foregroundStyle(.secondary)
 
                         Text(word.meaning)
-                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .minimumScaleFactor(0.7)
 
-                        TextField("英単語を入力", text: $answerText)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .focused($isAnswerFocused)
-                            .submitLabel(.done)
-                            .textFieldStyle(.roundedBorder)
-                            .disabled(checkedAnswer != nil)
-                            .onSubmit {
-                                check(word)
+                        if word.answerMode == .textInput {
+                            TextField("答えを入力", text: $answerText)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .focused($isAnswerFocused)
+                                .submitLabel(.done)
+                                .textFieldStyle(.roundedBorder)
+                                .disabled(checkedAnswer != nil)
+                                .onSubmit {
+                                    check(word, answer: answerText)
+                                }
+                        } else {
+                            ChoiceGrid(
+                                options: choiceOptions,
+                                selectedAnswer: answerText,
+                                isDisabled: checkedAnswer != nil
+                            ) { option in
+                                answerText = option
+                                check(word, answer: option)
                             }
+                        }
 
                         if let checkedAnswer {
                             ResultPanel(result: checkedAnswer, word: word)
@@ -55,13 +96,13 @@ struct PracticeView: View {
 
                     if checkedAnswer == nil {
                         Button {
-                            check(word)
+                            check(word, answer: answerText)
                         } label: {
                             Label("答え合わせ", systemImage: "checkmark.circle")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(normalized(answerText).isEmpty)
+                        .disabled(word.answerMode == .multipleChoice || normalized(answerText).isEmpty)
                     } else {
                         HStack(spacing: 12) {
                             Button {
@@ -83,32 +124,36 @@ struct PracticeView: View {
                     }
                 } else {
                     ContentUnavailableView(
-                        "復習する単語がありません",
+                        "復習する語句がありません",
                         systemImage: "sparkles",
-                        description: Text("新しい単語を追加するか、覚えた単語の状態を変更すると復習できます。")
+                        description: Text("新しい語句を追加するか、覚えた語句の状態を変更すると復習できます。")
                     )
                 }
             }
             .padding()
             .navigationTitle("復習")
-            .onChange(of: currentWord?.id) { _, _ in
-                resetAnswer()
-            }
             .onAppear {
-                isAnswerFocused = currentWord != nil
+                prepareQuestion()
+            }
+            .onChange(of: selectedSeries) { _, _ in
+                currentIndex = 0
+                prepareQuestion()
+            }
+            .onChange(of: currentWord?.id) { _, _ in
+                prepareQuestion()
             }
         }
     }
 
-    private func check(_ word: VocabularyWord) {
-        let userAnswer = normalized(answerText)
+    private func check(_ word: VocabularyWord, answer: String) {
+        let userAnswer = normalized(answer)
         guard !userAnswer.isEmpty else { return }
 
         let correctAnswer = normalized(word.term)
         let isCorrect = userAnswer == correctAnswer
 
         withAnimation(.snappy) {
-            checkedAnswer = CheckedAnswer(input: answerText, isCorrect: isCorrect)
+            checkedAnswer = CheckedAnswer(input: answer, isCorrect: isCorrect)
         }
     }
 
@@ -118,16 +163,23 @@ struct PracticeView: View {
     }
 
     private func moveToNextQuestion() {
-        resetAnswer()
-        if currentIndex >= max(dueWords.count - 1, 0) {
+        if currentIndex >= dueWords.count {
             currentIndex = 0
         }
-        isAnswerFocused = currentWord != nil
+        prepareQuestion()
     }
 
-    private func resetAnswer() {
+    private func prepareQuestion() {
         answerText = ""
         checkedAnswer = nil
+
+        if let word = currentWord {
+            choiceOptions = store.choiceOptions(for: word)
+            isAnswerFocused = word.answerMode == .textInput
+        } else {
+            choiceOptions = []
+            isAnswerFocused = false
+        }
     }
 
     private func normalized(_ value: String) -> String {
@@ -138,6 +190,31 @@ struct PracticeView: View {
 private struct CheckedAnswer: Equatable {
     let input: String
     let isCorrect: Bool
+}
+
+private struct ChoiceGrid: View {
+    let options: [String]
+    let selectedAnswer: String
+    let isDisabled: Bool
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+            ForEach(options, id: \.self) { option in
+                Button {
+                    onSelect(option)
+                } label: {
+                    Text(option)
+                        .font(.body.weight(.medium))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                }
+                .buttonStyle(.bordered)
+                .disabled(isDisabled)
+                .tint(selectedAnswer == option ? .accentColor : nil)
+            }
+        }
+    }
 }
 
 private struct ResultPanel: View {
